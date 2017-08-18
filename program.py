@@ -9,10 +9,10 @@ def main():
                         level=logging.INFO)
     bot = BotModel(config.token)
     mqttclient = MQTTModel()
-    mqttclient.SetMessageEvent(bot.MqttMessage)
+    mqttclient.SetMessageEvent(bot.mqtt_message)
     mqttclient.Connect(config.MQTTAddress)
     mqttThread = threading.Thread(target=mqttclient.Run)
-    botThread = threading.Thread(target=bot.Run)
+    botThread = threading.Thread(target=bot.run)
     mqttThread.start()
     botThread.start()
 
