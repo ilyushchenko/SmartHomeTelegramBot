@@ -6,6 +6,7 @@ import config
 import random
 import string
 import sqlite3 as lite
+import json
 
 
 class BotModel:
@@ -93,15 +94,12 @@ class BotModel:
         bot.send_message(chat_id=update.message.chat_id, text=self.get_help_text())
 
     def echo(self, bot, update):
-        bot.send_message(chat_id=update.message.chat_id, text=update.message.text)
+        bot.send_message(chat_id=update.message.chat_id, text='%s Chat ID:%d' %(update.message.text, update.message.chat_id))
 
     def caps(self, bot, update, args):
         print(args)
         text_caps = ' '.join(args).upper()
         bot.send_message(chat_id=update.message.chat_id, text=text_caps)
-
-    def SetAlarm(self, bot, update):
-        pass
 
     # Section of Adding module
     def add_module(self, bot, update):
@@ -195,9 +193,20 @@ class BotModel:
         mqttc.loop(2)
 
     def mqtt_message(self, client, userdata, msg):
-        if (msg.topic == "info/switch/LS01"):
-            if msg.payload == b'1':
-                # 428885624
-                self.updater.bot.send_message(428885624, "The light was on!")
-            elif msg.payload == b'0':
-                self.updater.bot.send_message(428885624, "The lights are turned off!")
+
+        msg_json = json.loads(msg.payload)
+
+        con = lite.connect('data.db')
+
+        with con:
+            cur = con.cursor()
+            cur.execute("SELECT * FROM Modules WHERE moduleid = '%s'" % msg_json['token'])
+            row = cur.fetchone()
+
+            if row is not None:
+                if row[4] == 1:
+                    if msg_json['payload'] == '1':
+                        # 428885624
+                        self.updater.bot.send_message(row[0], "The light was on!")
+                    elif msg_json['payload'] == '0':
+                        self.updater.bot.send_message(row[0], "The lights are turned off!")
