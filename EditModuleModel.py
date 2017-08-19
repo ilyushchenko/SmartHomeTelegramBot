@@ -35,7 +35,7 @@ class EditModule:
                                     ]
             },
 
-            fallbacks=[RegexHandler('^Done$', self.cancel, pass_user_data=True)]
+            fallbacks=[RegexHandler('^Done$', self.done, pass_user_data=True)]
         )
         return edit_module_handler
 
@@ -61,29 +61,16 @@ class EditModule:
 
     def save_module_settings(self, bot, update, user_data):
         message = "Новые настройки сохранены!\n"
-        # TODO: Добавить изменение настроек в базу данных
 
-        # con = lite.connect('data.db')
-        # with con:
-        #     cur = con.cursor()
-        #     cur.execute("SELECT * FROM Modules WHERE userid = '%d'" % update.message.chat_id)
-        #     rows = cur.fetchall()
-        #
-        #     modules = []
-        #     message = 'Список доступных модулей:\n\n'
-        #     for (i, row) in enumerate(rows):
-        #         message += '%d - <b>%s</b> [Topic: %s]\n' % (i, row[2], row[3])
-        #         modules.append(row)
-        # message += '\n\nВведите номер модуля, для изменения параметров'
-        # if row is not None:
-        #         if row[4] == 1:
-        #             if msg_json['payload'] == '1':
-        #                 # 428885624
-        #                 self.updater.bot.send_message(row[0], "The light was on!")
-        #             elif msg_json['payload'] == '0':
-        #                 self.updater.bot.send_message(row[0], "The lights are turned off!")
-        #
-        # reply_keyboard = [['Notification'], ['Data Topic'], ["Name"]]
+        if user_data['choise'] == "Name":
+            user_data["name"] = update.message.text
+        elif user_data['choise'] == "Topic":
+            user_data["topic"] = update.message.text
+        elif user_data['choise'] == "Notify":
+            if update.message.text == "Да":
+                user_data["notify"] = 1
+            else:
+                user_data["notify"] = 0
         update.message.reply_text(message)
 
         return self.edit_module_state(bot, update, user_data)
@@ -139,7 +126,16 @@ class EditModule:
         update.message.reply_text(self.get_settings_message(user_data), reply_markup=markup)
         return self.SELECTSETTINGS
 
-    def cancel(self, bot, update, user_data):
+    def done(self, bot, update, user_data):
+
+        conn = lite.connect("data.db")
+        cursor = conn.cursor()
+
+        sql = "UPDATE Modules SET name = '%s', topic = '%s', notify = %d WHERE userid = %d AND moduleid = '%s'" % \
+              (user_data["name"], user_data["topic"], user_data["notify"], user_data["userid"], user_data["moduleid"])
+        cursor.execute(sql)
+        conn.commit()
+
         user = update.message.from_user
         # self.logger.info("User %s canceled the conversation." % user.first_name)
         update.message.reply_text('Bye! I hope we can talk again some day.',
