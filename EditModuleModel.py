@@ -4,7 +4,7 @@ import sqlite3 as lite
 
 
 class EditModule:
-    CHOOSING, SELECTSETTINGS, CHOOSEMODULE, TYPING_REPLY = range(4)
+    CHOOSING, SELECTSETTINGS, CHOOSEMODULE, TYPING_REPLY, EDITBUTTONS, EDITBUTTONSNAME, EDITBUTTONSTOPIC = range(7)
 
     def bind(self):
         edit_module_handler = ConversationHandler(
@@ -27,8 +27,35 @@ class EditModule:
                                  pass_user_data=True),
                     RegexHandler('^(Notify)$',
                                  self.edit_module_notify,
+                                 pass_user_data=True),
+                    RegexHandler('^(Buttons)$',
+                                 self.edit_module_busttons,
                                  pass_user_data=True)
                 ],
+
+                self.EDITBUTTONS: [
+                    RegexHandler('^(Добавить)$',
+                                 self.edit_module_busttons_add,
+                                 pass_user_data=True),
+                    RegexHandler('^(Удалить)$',
+                                 self.edit_module_busttons_remove,
+                                 pass_user_data=True)
+                ],
+
+                self.EDITBUTTONSNAME: [
+                    MessageHandler(Filters.text,
+                                   self.edit_module_busttons_add_name,
+                                   pass_user_data=True)
+                ],
+
+                self.EDITBUTTONSTOPIC: [
+                    MessageHandler(Filters.text,
+                                   self.edit_module_busttons_add_topic,
+                                   pass_user_data=True)
+                ],
+
+
+
                 self.TYPING_REPLY: [MessageHandler(Filters.text,
                                                    self.save_module_settings,
                                                    pass_user_data=True),
@@ -59,6 +86,34 @@ class EditModule:
                                   reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
         return self.TYPING_REPLY
 
+    def edit_module_busttons(self, bot, update, user_data):
+        user_data['choise'] = update.message.text
+        reply_keyboard = [["Добавить", "Удалить"]]
+        update.message.reply_text('Вот, что вы можете сделать с кнопками',
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
+        return self.EDITBUTTONS
+
+    def edit_module_busttons_add(self, bot, update, user_data):
+        update.message.reply_text('Введите название для кнопки', reply_markup=ReplyKeyboardRemove())
+        return self.EDITBUTTONSNAME
+
+    def edit_module_busttons_add_name(self, bot, update, user_data):
+        user_data['add_button_name'] = update.message.text
+        update.message.reply_text('Введите сообщение для отпраквки на модуль')
+        return self.EDITBUTTONSTOPIC
+
+    def edit_module_busttons_add_topic(self, bot, update, user_data):
+        user_data['add_button_topic'] = update.message.text
+        update.message.reply_text('Кнопка добавлена')
+        return self.save_module_settings(bot, update, user_data)
+
+    def edit_module_busttons_remove(self, bot, update, user_data):
+        user_data['choise'] = update.message.text
+        reply_keyboard = [["Добавить", "Удалить"]]
+        update.message.reply_text('Вот, что вы можете сделать с кнопками',
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
+        return self.EDITBUTTONS
+
     def save_module_settings(self, bot, update, user_data):
         message = "Новые настройки сохранены!\n"
 
@@ -71,9 +126,22 @@ class EditModule:
                 user_data["notify"] = 1
             else:
                 user_data["notify"] = 0
+        elif user_data['choise'] == "Buttons":
+            self.add_button(user_data['moduleid'], user_data['add_button_name'], user_data['add_button_topic'])
         update.message.reply_text(message)
+        print(user_data)
 
         return self.edit_module_state(bot, update, user_data)
+
+    def add_button(self,moduleid, name, topic):
+        con = lite.connect('data.db')
+        cur = con.cursor()
+        command = "INSERT INTO ModuleButtons(moduleid, name, message) VALUES('%s', '%s', '%s')" % \
+                  (moduleid, name, topic)
+        #TODO: убрать дебаг
+        print(command)
+        cur.execute(command)
+        con.commit()
 
     def edit_module(self, bot, update, user_data):
         con = lite.connect('data.db')
@@ -118,7 +186,7 @@ class EditModule:
     def edit_module_state(self, bot, update, user_data):
         reply_keyboard = [
             ['Name', 'Topic'],
-            ['Notify'],
+            ['Notify', 'Buttons'],
             ['Done']
         ]
 
