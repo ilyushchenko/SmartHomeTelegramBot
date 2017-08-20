@@ -2,7 +2,7 @@ import paho.mqtt.client as mqtt
 
 
 class MQTTModel:
-    subTopics = ["info/switch/LS01"]
+    subTopics = []
 
     def __init__(self):
         self.client = mqtt.Client()
@@ -33,3 +33,20 @@ class MQTTModel:
 
     def SetMessageEvent(self, func):
         self.client.on_message = func
+
+    def subscribe(self, topic):
+        is_found = False
+        listen_topic = 'info/' + topic
+        for sub_topic in self.subTopics:
+            if listen_topic == sub_topic:
+                is_found = True
+                break
+        if not (is_found):
+            self.subTopics.append(listen_topic)
+            self.client.subscribe(listen_topic)
+
+    def unsubscribe(self, topic):
+        self.client.unsubscribe('info/' + topic)
+
+    def publish(self, topic, payload):
+        self.client.publish(topic, payload)

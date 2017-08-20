@@ -7,9 +7,8 @@ from MqttModel import MQTTModel
 def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         level=logging.INFO)
-    bot = BotModel(config.token)
     mqttclient = MQTTModel()
-    mqttclient.SetMessageEvent(bot.mqtt_message)
+    bot = BotModel(config.token, mqttclient)
     mqttclient.Connect(config.MQTTAddress)
     mqttThread = threading.Thread(target=mqttclient.Run)
     botThread = threading.Thread(target=bot.run)

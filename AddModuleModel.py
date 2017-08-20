@@ -4,8 +4,12 @@ import sqlite3 as lite
 import random
 import string
 
+
 class AddModule:
     ModuleName, ModuleTopic = range(2)
+
+    def __init__(self, mqtt):
+        self.mqtt = mqtt
 
     def bind(self):
         conv_handler = ConversationHandler(
@@ -52,6 +56,7 @@ class AddModule:
                 update.message.chat_id, token, user_data['name'], user_data['topic'])
             print(command)
             cur.execute(command)
+            self.mqtt.subscribe(user_data["topic"])
 
             # bot.send_message(chat_id=update.message.chat_id, text="I'm a bot, please talk to me!")
         update.message.reply_text(
@@ -62,7 +67,7 @@ class AddModule:
 
     def cancel(self, bot, update):
         user = update.message.from_user
-        #self.logger.info("User %s canceled the conversation." % user.first_name)
+        # self.logger.info("User %s canceled the conversation." % user.first_name)
         update.message.reply_text('Bye! I hope we can talk again some day.',
                                   reply_markup=ReplyKeyboardRemove())
 

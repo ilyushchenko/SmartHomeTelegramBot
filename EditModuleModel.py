@@ -1,10 +1,14 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, RegexHandler
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, RegexHandler, \
+    CallbackQueryHandler
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 import sqlite3 as lite
 
 
 class EditModule:
     CHOOSING, SELECTSETTINGS, CHOOSEMODULE, TYPING_REPLY, EDITBUTTONS, EDITBUTTONSNAME, EDITBUTTONSTOPIC = range(7)
+
+    def __init__(self, mqtt):
+        self.mqtt = mqtt
 
     def bind(self):
         edit_module_handler = ConversationHandler(
@@ -12,9 +16,7 @@ class EditModule:
 
             states={
                 self.CHOOSEMODULE: [
-                    RegexHandler('^(\d+)$',
-                                 self.choose_module,
-                                 pass_user_data=True)
+                    CallbackQueryHandler(self.choose_module, pass_user_data=True)
                 ],
                 self.CHOOSING: [
                     MessageHandler(Filters.text,
@@ -54,8 +56,6 @@ class EditModule:
                                    pass_user_data=True)
                 ],
 
-
-
                 self.TYPING_REPLY: [MessageHandler(Filters.text,
                                                    self.save_module_settings,
                                                    pass_user_data=True),
@@ -65,6 +65,13 @@ class EditModule:
             fallbacks=[RegexHandler('^Done$', self.done, pass_user_data=True)]
         )
         return edit_module_handler
+
+    def button(self, bot, update, user_data):
+        query = update.callback_query
+        print(user_data)
+        bot.edit_message_text(text="Selected optiondsada: %s" % query.data,
+                              chat_id=query.message.chat_id,
+                              message_id=query.message.message_id)
 
     # Section of Edit module
 
@@ -120,7 +127,8 @@ class EditModule:
         if user_data['choise'] == "Name":
             user_data["name"] = update.message.text
         elif user_data['choise'] == "Topic":
-            user_data["topic"] = update.message.text
+            user_data["last_topic"] = update.message.text
+            user_data["topic"] = user_data["topic"]
         elif user_data['choise'] == "Notify":
             if update.message.text == "Да":
                 user_data["notify"] = 1
@@ -133,12 +141,12 @@ class EditModule:
 
         return self.edit_module_state(bot, update, user_data)
 
-    def add_button(self,moduleid, name, topic):
+    def add_button(self, moduleid, name, topic):
         con = lite.connect('data.db')
         cur = con.cursor()
         command = "INSERT INTO ModuleButtons(moduleid, name, message) VALUES('%s', '%s', '%s')" % \
                   (moduleid, name, topic)
-        #TODO: убрать дебаг
+        # TODO: убрать дебаг
         print(command)
         cur.execute(command)
         con.commit()
@@ -149,31 +157,49 @@ class EditModule:
             cur = con.cursor()
             cur.execute("SELECT * FROM Modules WHERE userid = '%d'" % update.message.chat_id)
             rows = cur.fetchall()
-            modules = []
-            message = 'Список доступных модулей:\n\n'
+
+            keyboard = []
+
+            message = 'Выберите модуль:\n\n'
             for (i, row) in enumerate(rows):
-                message += '%d - <b>%s</b> [Topic: %s]\n' % (i, row[2], row[3])
-                modules.append(row)
-            message += '\n\nВведите номер модуля, для изменения параметров'
-        user_data['modules'] = modules
-        update.message.reply_text(message, parse_mode=ParseMode.HTML)
+                keyboard.append(
+                    [InlineKeyboardButton('%s [Topic: %s]\n' % (row[2], row[3]), callback_data='%s' % row[1])])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text(message, reply_markup=reply_markup)
         return self.CHOOSEMODULE
 
     def choose_module(self, bot, update, user_data):
-        module_number = int(update.message.text)
-        if module_number >= 0 and module_number < len(user_data["modules"]):
-            module = user_data["modules"][module_number]
-            del user_data["modules"]
-            user_data["userid"] = module[0]
-            user_data["moduleid"] = module[1]
-            user_data["name"] = module[2]
-            user_data["topic"] = module[3]
-            user_data["notify"] = module[4]
-            return self.edit_module_state(bot, update, user_data)
-        else:
-            update.message.reply_text('Упс! Такого модуля не найдено!\n'
-                                      'Попробуйте ввести номер еще раз')
-            return self.CHOOSEMODULE
+        query = update.callback_query
+
+        con = lite.connect('data.db')
+        with con:
+            cur = con.cursor()
+            cur.execute("SELECT * FROM Modules WHERE moduleid = '%s'" % query.data)
+            row = cur.fetchone()
+            if row is not None:
+                user_data["userid"] = row[0]
+                user_data["moduleid"] = row[1]
+                user_data["name"] = row[2]
+                user_data["topic"] = row[3]
+                user_data["last_topic"] = row[3]
+                user_data["notify"] = row[4]
+                bot.edit_message_text(text="Selected optiondsada: %s" % query.data,
+                                      chat_id=query.message.chat_id,
+                                      message_id=query.message.message_id)
+                return self.edit_module_state(bot, query, user_data)
+
+
+
+                # module_number = int(update.message.text)
+                # if module_number >= 0 and module_number < len(user_data["modules"]):
+                #     module = user_data["modules"][module_number]
+                #     del user_data["modules"]
+                #
+                #
+                # else:
+                #     update.message.reply_text('Упс! Такого модуля не найдено!\n'
+                #                               'Попробуйте ввести номер еще раз')
+                #     return self.CHOOSEMODULE
 
     def get_settings_message(self, user_data):
         message = 'Ок! Текущие настройки:\n'
@@ -203,6 +229,9 @@ class EditModule:
               (user_data["name"], user_data["topic"], user_data["notify"], user_data["userid"], user_data["moduleid"])
         cursor.execute(sql)
         conn.commit()
+        if user_data['topic'] != user_data['last_topic']:
+            self.mqtt.unsubscribe(user_data['last_topic'])
+            self.mqtt.subscribe(user_data['topic'])
 
         user = update.message.from_user
         # self.logger.info("User %s canceled the conversation." % user.first_name)
