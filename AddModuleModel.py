@@ -11,7 +11,8 @@ class AddModule:
     def __init__(self, mqtt):
         self.mqtt = mqtt
 
-    def bind(self):
+    def get_handlers(self):
+        handlers = []
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('addmodule', self.add_module)],
 
@@ -23,7 +24,8 @@ class AddModule:
 
             fallbacks=[CommandHandler('cancel', self.cancel)]
         )
-        return conv_handler
+        handlers.append(conv_handler)
+        return handlers
 
     # Section of Adding module
     def add_module(self, bot, update):
