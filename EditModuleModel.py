@@ -1,207 +1,305 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, RegexHandler, \
-    CallbackQueryHandler
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
-import sqlite3 as lite
+from telegram.ext import CommandHandler, MessageHandler, Filters, ConversationHandler, RegexHandler
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode
+from Database import DB
+import config
 
 
 class EditModule:
-    CHOOSING, SELECTSETTINGS, CHOOSEMODULE, TYPING_REPLY, EDITBUTTONS, EDITBUTTONSNAME, EDITBUTTONSTOPIC = range(7)
+    CHOOSING_MODULE_NUMBER, \
+    CHOOSING, \
+    SELECT_SETTINGS, \
+    TYPING_REPLY, \
+    TYPING_MODULE_TOPIC, \
+    TYPING_MODULE_NAME, \
+    EDIT_NOTIFY, \
+    EDIT_NOTIFY_SAVE, \
+    EDIT_BUTTONS, \
+    CHOOSING_REMOVE_BUTTON, \
+    CHOOSING_REMOVE_BUTTON_CONFIRM, \
+    ADD_BUTTONS_NAME, \
+    ADD_BUTTONS_MESSAGE = range(13)
 
     def __init__(self, mqtt):
         self.mqtt = mqtt
 
-    def bind(self):
+    def get_handlers(self):
+        handlers = []
         edit_module_handler = ConversationHandler(
-            entry_points=[CommandHandler('editmodule', self.edit_module, pass_user_data=True)],
+            entry_points=[CommandHandler('editmodule', self.__edit_module, pass_user_data=True)],
 
             states={
-                self.CHOOSEMODULE: [
-                    CallbackQueryHandler(self.choose_module, pass_user_data=True)
+                self.CHOOSING_MODULE_NUMBER: [
+                    RegexHandler('^(\d*)$',
+                                 self.__choose_module,
+                                 pass_user_data=True),
+                    CommandHandler("cancel", self.__cancel, pass_user_data=True),
+                    MessageHandler(Filters.all,
+                                   self.__choose_module_error,
+                                   pass_user_data=True)
                 ],
                 self.CHOOSING: [
                     MessageHandler(Filters.text,
-                                   self.edit_module_state,
+                                   self.__edit_module_state,
                                    pass_user_data=True),
                 ],
-                self.SELECTSETTINGS: [
-                    RegexHandler('^(Name|Topic)$',
-                                 self.edit_module_settings,
-                                 pass_user_data=True),
+                self.SELECT_SETTINGS: [
+                    RegexHandler('^(Name)$',
+                                 self.__edit_module_name),
+                    RegexHandler('^(Topic)$',
+                                 self.__edit_module_topic),
                     RegexHandler('^(Notify)$',
-                                 self.edit_module_notify,
-                                 pass_user_data=True),
+                                 self.__edit_module_notify),
                     RegexHandler('^(Buttons)$',
-                                 self.edit_module_busttons,
+                                 self.__edit_module_busttons)
+                ],
+                self.TYPING_MODULE_NAME: [
+                    MessageHandler(Filters.text,
+                                   self.__edit_module_name_save,
+                                   pass_user_data=True)
+                ],
+                self.TYPING_MODULE_TOPIC: [
+                    MessageHandler(Filters.text,
+                                   self.__edit_module_topic_save,
+                                   pass_user_data=True)
+                ],
+                self.EDIT_NOTIFY_SAVE: [
+                    RegexHandler('^(Да|Нет)$',
+                                 self.__edit_module_notify_save,
                                  pass_user_data=True)
                 ],
-
-                self.EDITBUTTONS: [
+                self.EDIT_BUTTONS: [
                     RegexHandler('^(Добавить)$',
-                                 self.edit_module_busttons_add,
+                                 self.__edit_module_busttons_add,
                                  pass_user_data=True),
                     RegexHandler('^(Удалить)$',
-                                 self.edit_module_busttons_remove,
+                                 self.__edit_module_busttons_remove,
                                  pass_user_data=True)
                 ],
-
-                self.EDITBUTTONSNAME: [
+                self.CHOOSING_REMOVE_BUTTON: [
+                    RegexHandler('^(\d*)$',
+                                 self.__edit_module_busttons_remove_select,
+                                 pass_user_data=True),
+                ],
+                self.CHOOSING_REMOVE_BUTTON_CONFIRM: [
+                    RegexHandler('^(Да|Нет)$',
+                                 self.__edit_module_busttons_remove_confirm,
+                                 pass_user_data=True),
+                ],
+                self.ADD_BUTTONS_NAME: [
                     MessageHandler(Filters.text,
-                                   self.edit_module_busttons_add_name,
+                                   self.__edit_module_busttons_add_name,
                                    pass_user_data=True)
                 ],
 
-                self.EDITBUTTONSTOPIC: [
+                self.ADD_BUTTONS_MESSAGE: [
                     MessageHandler(Filters.text,
-                                   self.edit_module_busttons_add_topic,
+                                   self.__edit_module_busttons_add_topic,
                                    pass_user_data=True)
                 ],
 
                 self.TYPING_REPLY: [MessageHandler(Filters.text,
-                                                   self.save_module_settings,
+                                                   self.__save_module_settings,
                                                    pass_user_data=True),
                                     ]
             },
 
-            fallbacks=[RegexHandler('^Done$', self.done, pass_user_data=True)]
+            fallbacks=[
+                RegexHandler('^Done$', self.__done, pass_user_data=True),
+            ]
         )
-        return edit_module_handler
-
-    def button(self, bot, update, user_data):
-        query = update.callback_query
-        print(user_data)
-        bot.edit_message_text(text="Selected optiondsada: %s" % query.data,
-                              chat_id=query.message.chat_id,
-                              message_id=query.message.message_id)
+        handlers.append(edit_module_handler)
+        return handlers
 
     # Section of Edit module
 
-    def edit_module_settings(self, bot, update, user_data):
-        user_data['choise'] = update.message.text
-        message = ''
-        if update.message.text == "Name":
-            message = 'Введите новое имя для модуля'
-        elif update.message.text == "Topic":
-            message = 'Введите новый топик'
+    def __edit_module_topic(self, bot, update):
+        message = 'Введите новый топик'
         update.message.reply_text(message)
+        return self.TYPING_MODULE_TOPIC
 
-        return self.TYPING_REPLY
+    def __edit_module_topic_save(self, bot, update, user_data):
+        user_data['topic'] = update.message.text
+        sql = "UPDATE Modules SET topic = '%s' WHERE userid = %d AND moduleid = '%s'" % \
+              (user_data["topic"], user_data["userid"], user_data["moduleid"])
+        db = DB(config.database)
+        db.execute(sql)
+        db.commit()
+        update.message.reply_text("Топик модуля изменен")
+        return self.__edit_module_state(bot, update, user_data)
 
-    def edit_module_notify(self, bot, update, user_data):
-        user_data['choise'] = update.message.text
+    def __edit_module_name(self, bot, update):
+        message = 'Введите новое имя для модуля'
+        update.message.reply_text(message)
+        return self.TYPING_MODULE_NAME
+
+    def __edit_module_name_save(self, bot, update, user_data):
+        user_data['name'] = update.message.text
+        sql = "UPDATE Modules SET name = '%s' WHERE userid = %d AND moduleid = '%s'" % \
+              (user_data["name"], user_data["userid"], user_data["moduleid"])
+        db = DB(config.database)
+        db.execute(sql)
+        db.commit()
+        update.message.reply_text("Текст модуля изменен")
+        return self.__edit_module_state(bot, update, user_data)
+
+    def __edit_module_notify(self, bot, update):
         reply_keyboard = [["Да", "Нет"]]
         update.message.reply_text('Вы хотите получать уведомления?',
-                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
-        return self.TYPING_REPLY
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+        return self.EDIT_NOTIFY_SAVE
 
-    def edit_module_busttons(self, bot, update, user_data):
-        user_data['choise'] = update.message.text
+    def __edit_module_notify_save(self, bot, update, user_data):
+        if update.message.text == "Да":
+            user_data["notify"] = 1
+        else:
+            user_data["notify"] = 0
+            sql = "UPDATE Modules SET notify = %d WHERE userid = %d AND moduleid = '%s'" % \
+                  (user_data["notify"], user_data["userid"], user_data["moduleid"])
+            db = DB(config.database)
+            db.execute(sql)
+            db.commit()
+        update.message.reply_text('Настройки уведомлений успешно изменены',
+                                  reply_markup=ReplyKeyboardRemove())
+        return self.__edit_module_state(bot, update, user_data)
+
+    def __edit_module_busttons(self, bot, update):
         reply_keyboard = [["Добавить", "Удалить"]]
         update.message.reply_text('Вот, что вы можете сделать с кнопками',
-                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
-        return self.EDITBUTTONS
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+        return self.EDIT_BUTTONS
 
-    def edit_module_busttons_add(self, bot, update, user_data):
+    def __edit_module_busttons_add(self, bot, update, user_data):
         update.message.reply_text('Введите название для кнопки', reply_markup=ReplyKeyboardRemove())
-        return self.EDITBUTTONSNAME
+        return self.ADD_BUTTONS_NAME
 
-    def edit_module_busttons_add_name(self, bot, update, user_data):
+    def __edit_module_busttons_add_name(self, bot, update, user_data):
         user_data['add_button_name'] = update.message.text
         update.message.reply_text('Введите сообщение для отпраквки на модуль')
-        return self.EDITBUTTONSTOPIC
+        return self.ADD_BUTTONS_MESSAGE
 
-    def edit_module_busttons_add_topic(self, bot, update, user_data):
+    def __edit_module_busttons_add_topic(self, bot, update, user_data):
         user_data['add_button_topic'] = update.message.text
+        db = DB(config.database)
+        db.execute("INSERT INTO ModuleButtons(moduleid, name, message) VALUES('%s', '%s', '%s')" % (
+            user_data['moduleid'], user_data['add_button_name'], user_data['add_button_topic']))
+        db.commit()
+        del user_data['add_button_name']
+        del user_data['add_button_topic']
         update.message.reply_text('Кнопка добавлена')
-        return self.save_module_settings(bot, update, user_data)
+        return self.__save_module_settings(bot, update, user_data)
 
-    def edit_module_busttons_remove(self, bot, update, user_data):
-        user_data['choise'] = update.message.text
-        reply_keyboard = [["Добавить", "Удалить"]]
-        update.message.reply_text('Вот, что вы можете сделать с кнопками',
-                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
-        return self.EDITBUTTONS
+    def __edit_module_busttons_remove(self, bot, update, user_data):
+        message = 'Вот вписок кнопок, для этого модуля:\n\n'
+        db = DB(config.database)
+        rows = db.fetchall("SELECT * FROM ModuleButtons WHERE moduleid = '%s'" % user_data["moduleid"])
+        for (i, row) in enumerate(rows):
+            message += '%d - %s [Message: %s]\n' % (i, row['name'], row['message'])
+        message += 'Введите номер кнопки, для удаления'
+        user_data['remove_buttons'] = rows
+        update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
+        return self.CHOOSING_REMOVE_BUTTON
 
-    def save_module_settings(self, bot, update, user_data):
+    def __edit_module_busttons_remove_select(self, bot, update, user_data):
+        button_number = int(update.message.text)
+        if button_number >= 0 and button_number < len(user_data["remove_buttons"]):
+            button = user_data["remove_buttons"][button_number]
+            del user_data["remove_buttons"]
+            user_data["remove_button"] = button
+
+            reply_keyboard = [["Да", "Нет"]]
+            update.message.reply_text('Вы точно хотитеудалить кнопку',
+                                      reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                       resize_keyboard=True))
+            return self.CHOOSING_REMOVE_BUTTON_CONFIRM
+        else:
+            update.message.reply_text('Ой, такой кнопки нет!\n'
+                                      'Номер должен быть от 0 до %d \n\n'
+                                      'Попробуйте ввести номер еще раз или введите /cancel, для отмены'
+                                      % (len(user_data["remove_buttons"]) - 1))
+            return self.CHOOSING_REMOVE_BUTTON
+
+    def __edit_module_busttons_remove_confirm(self, bot, update, user_data):
+        if update.message.text == "Да":
+            db = DB(config.database)
+            db.execute("DELETE FROM ModuleButtons WHERE buttonid = %d" % user_data["remove_button"]["buttonid"])
+            db.commit()
+            del user_data["remove_button"]
+            update.message.reply_text('Кнопка удалена', reply_markup=ReplyKeyboardRemove())
+            return  self.__edit_module_state(bot, update, user_data)
+        else:
+            del user_data["remove_button"]
+            update.message.reply_text('Кнопка не удалена', reply_markup=ReplyKeyboardRemove())
+            return  self.__edit_module_state(bot, update, user_data)
+
+    def __save_module_settings(self, bot, update, user_data):
         message = "Новые настройки сохранены!\n"
 
-        if user_data['choise'] == "Name":
-            user_data["name"] = update.message.text
-        elif user_data['choise'] == "Topic":
-            user_data["last_topic"] = update.message.text
-            user_data["topic"] = user_data["topic"]
-        elif user_data['choise'] == "Notify":
-            if update.message.text == "Да":
-                user_data["notify"] = 1
-            else:
-                user_data["notify"] = 0
-        elif user_data['choise'] == "Buttons":
-            self.add_button(user_data['moduleid'], user_data['add_button_name'], user_data['add_button_topic'])
-        update.message.reply_text(message)
-        print(user_data)
+        # if user_data['choise'] == "Name":
+        #     user_data["name"] = update.message.text
+        # elif user_data['choise'] == "Topic":
+        #     user_data["last_topic"] = update.message.text
+        #     user_data["topic"] = user_data["topic"]
+        # elif user_data['choise'] == "Notify":
+        #     if update.message.text == "Да":
+        #         user_data["notify"] = 1
+        #     else:
+        #         user_data["notify"] = 0
+        # elif user_data['choise'] == "Buttons":
+        #     self.__add_button(user_data['moduleid'], user_data['add_button_name'], user_data['add_button_topic'])
+        # update.message.reply_text(message)
 
-        return self.edit_module_state(bot, update, user_data)
+        return self.__edit_module_state(bot, update, user_data)
 
-    def add_button(self, moduleid, name, topic):
-        con = lite.connect('data.db')
-        cur = con.cursor()
+    def __add_button(self, moduleid, name, topic):
         command = "INSERT INTO ModuleButtons(moduleid, name, message) VALUES('%s', '%s', '%s')" % \
                   (moduleid, name, topic)
-        # TODO: убрать дебаг
-        print(command)
-        cur.execute(command)
-        con.commit()
+        # self.db.execute(command)
+        # self.db.commit()
 
-    def edit_module(self, bot, update, user_data):
-        con = lite.connect('data.db')
-        with con:
-            cur = con.cursor()
-            cur.execute("SELECT * FROM Modules WHERE userid = '%d'" % update.message.chat_id)
-            rows = cur.fetchall()
+    def __edit_module(self, bot, update, user_data):
+        db = DB(config.database)
+        rows = db.fetchall("SELECT * FROM Modules WHERE userid = '%d'" % update.message.chat_id)
+        db.close()
+        modules = []
+        message = 'Введите номер модуля:\n\n'
+        for (i, row) in enumerate(rows):
+            message += '%d - <b>%s</b> [Topic: %s]\n' % (i, row['name'], row['topic'])
+            modules.append(row)
+        user_data["modules"] = modules
+        update.message.reply_text(message, parse_mode=ParseMode.HTML)
+        return self.CHOOSING_MODULE_NUMBER
 
-            keyboard = []
-
-            message = 'Выберите модуль:\n\n'
-            for (i, row) in enumerate(rows):
-                keyboard.append(
-                    [InlineKeyboardButton('%s [Topic: %s]\n' % (row[2], row[3]), callback_data='%s' % row[1])])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(message, reply_markup=reply_markup)
-        return self.CHOOSEMODULE
-
-    def choose_module(self, bot, update, user_data):
-        query = update.callback_query
-
-        con = lite.connect('data.db')
-        with con:
-            cur = con.cursor()
-            cur.execute("SELECT * FROM Modules WHERE moduleid = '%s'" % query.data)
-            row = cur.fetchone()
+    def __choose_module(self, bot, update, user_data):
+        module_number = int(update.message.text)
+        if module_number >= 0 and module_number < len(user_data["modules"]):
+            module = user_data["modules"][module_number]
+            del user_data["modules"]
+            db = DB(config.database)
+            row = db.fetchone("SELECT * FROM Modules WHERE moduleid = '%s'" % module['moduleid'])
             if row is not None:
-                user_data["userid"] = row[0]
-                user_data["moduleid"] = row[1]
-                user_data["name"] = row[2]
-                user_data["topic"] = row[3]
-                user_data["last_topic"] = row[3]
-                user_data["notify"] = row[4]
-                bot.edit_message_text(text="Selected optiondsada: %s" % query.data,
-                                      chat_id=query.message.chat_id,
-                                      message_id=query.message.message_id)
-                return self.edit_module_state(bot, query, user_data)
+                user_data["userid"] = row["userid"]
+                user_data["moduleid"] = row["moduleid"]
+                user_data["name"] = row["name"]
+                user_data["topic"] = row["topic"]
+                user_data["last_topic"] = row["topic"]
+                user_data["notify"] = row["notify"]
+                return self.__edit_module_state(bot, update, user_data)
+        else:
+            update.message.reply_text('Ой, такого молудя нет!\n'
+                                      'Номер должен быть от 0 до %d \n\n'
+                                      'Попробуйте ввести номер еще раз или введите /cancel, для отмены'
+                                      % (len(user_data["modules"]) - 1))
+            return self.CHOOSING_MODULE_NUMBER
 
+    def __choose_module_error(self, bot, update, user_data):
+        message = 'Упс! Ошибочка\n' \
+                  'Нужно ввести цифру от <b>0 до %d</b> или /cancel, для отмены' % (len(user_data["modules"]) - 1)
+        update.message.reply_text(message, parse_mode=ParseMode.HTML)
+        return self.CHOOSING_MODULE_NUMBER
 
-
-                # module_number = int(update.message.text)
-                # if module_number >= 0 and module_number < len(user_data["modules"]):
-                #     module = user_data["modules"][module_number]
-                #     del user_data["modules"]
-                #
-                #
-                # else:
-                #     update.message.reply_text('Упс! Такого модуля не найдено!\n'
-                #                               'Попробуйте ввести номер еще раз')
-                #     return self.CHOOSEMODULE
-
-    def get_settings_message(self, user_data):
+    def __get_settings_message(self, user_data):
         message = 'Ок! Текущие настройки:\n'
         message += 'Название: %s\n' % user_data["name"]
         message += 'Топик: %s\n' % user_data["topic"]
@@ -209,33 +307,25 @@ class EditModule:
         message += 'Выберите, что хотите изменить или сохраните настройки'
         return message
 
-    def edit_module_state(self, bot, update, user_data):
+    def __edit_module_state(self, bot, update, user_data):
         reply_keyboard = [
             ['Name', 'Topic'],
             ['Notify', 'Buttons'],
             ['Done']
         ]
 
-        markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
-        update.message.reply_text(self.get_settings_message(user_data), reply_markup=markup)
-        return self.SELECTSETTINGS
+        markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
+        update.message.reply_text(self.__get_settings_message(user_data), reply_markup=markup)
+        return self.SELECT_SETTINGS
 
-    def done(self, bot, update, user_data):
-
-        conn = lite.connect("data.db")
-        cursor = conn.cursor()
-
-        sql = "UPDATE Modules SET name = '%s', topic = '%s', notify = %d WHERE userid = %d AND moduleid = '%s'" % \
-              (user_data["name"], user_data["topic"], user_data["notify"], user_data["userid"], user_data["moduleid"])
-        cursor.execute(sql)
-        conn.commit()
-        if user_data['topic'] != user_data['last_topic']:
-            self.mqtt.unsubscribe(user_data['last_topic'])
-            self.mqtt.subscribe(user_data['topic'])
-
-        user = update.message.from_user
-        # self.logger.info("User %s canceled the conversation." % user.first_name)
+    def __done(self, bot, update, user_data):
+        del user_data
         update.message.reply_text('Bye! I hope we can talk again some day.',
                                   reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
 
+    def __cancel(self, bot, update, user_data):
+        del user_data
+        update.message.reply_text('Изменение настроек модуля отменено',
+                                  reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
