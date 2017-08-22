@@ -1,14 +1,13 @@
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
-import paho.mqtt.client as mqtt
-import config
-
-import sqlite3 as lite
 import json
 from EditModuleModel import EditModule
 from AddModuleModel import AddModule
-from Database import DB
+from components.Database import DB
+from model.ModuleModel import Module
+from model.UserModel import User
+from model.ButtonModel import Button
 
 
 class BotModel:
@@ -20,11 +19,10 @@ class BotModel:
         self.dispatcher = self.updater.dispatcher
         self.mqtt = mqtt
         self.mqtt.SetMessageEvent(self.mqtt_message)
-        db = DB(config.database)
+        db = DB()
         rows = db.fetchall("SELECT * FROM Modules")
         for row in rows:
             self.mqtt.subscribe(row['topic'])
-        print(mqtt.subTopics)
 
         buttons_handler = CallbackQueryHandler(self.buttons, pass_user_data=True)
         start_handler = CommandHandler('start', self.start)
@@ -46,7 +44,6 @@ class BotModel:
                             level=logging.INFO)
 
         self.logger = logging.getLogger(__name__)
-
         # log all errors
 
     def load_handlers(self, dispatcher, handlers_array):
@@ -74,43 +71,39 @@ class BotModel:
         bot.send_message(chat_id=update.message.chat_id, text=self.get_help_text())
 
     def search_module(self, bot, update):
-
-        db = DB(config.database)
-        row = db.fetchone("SELECT * FROM Modules WHERE name LIKE '%s' AND userid = %d" % (
-            update.message.text, update.message.chat_id))
-        if row is not None:
-            rows = db.fetchall("SELECT * FROM ModuleButtons WHERE moduleid = '%s'" % row['moduleid'])
-            keyboard = []
-            for (i, row) in enumerate(rows):
-                keyboard.append(
-                    [InlineKeyboardButton('%s' % row['name'], callback_data='%s' % row['buttonid'])])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            update.message.reply_text("Кнопки", reply_markup=reply_markup)
-
-        bot.send_message(chat_id=update.message.chat_id,
-                         text='%s Chat ID:%d' % (update.message.text, update.message.chat_id))
+        user = User(update.message.chat_id)
+        modules = user.get_modules()
+        if len(modules) > 0:
+            for module in modules:
+                if module.name == update.message.text:
+                    buttons = module.get_buttons()
+                    if len(buttons) > 0:
+                        keyboard = []
+                        for (i, button) in enumerate(buttons):
+                            keyboard.append(
+                                [InlineKeyboardButton('%s' % button.name, callback_data='%s' % button.button_id)])
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        update.message.reply_text("Кнопки модуля", reply_markup=reply_markup)
+                    else:
+                        update.message.reply_text("Кнопок для этого модуля нет")
+        else:
+            update.message.reply_text("Азаза, а модулей то нет!")
 
     def error(self, bot, update, error):
         self.logger.warning('Update "%s" caused error "%s"' % (update, error))
 
     def buttons(self, bot, update, user_data):
         query = update.callback_query
-        db = DB(config.database)
-        row = db.fetchone(
-            "SELECT topic, message FROM ModuleButtons, Modules WHERE ModuleButtons.buttonid = '%d' AND ModuleButtons.moduleid = Modules.moduleid" % int(
-                query.data))
-        if row is not None:
-            self.mqtt.publish(row['topic'], row['message'])
-
+        button = Button(int(query.data))
+        module = Module(button.module_id)
+        self.mqtt.publish(module.topic, button.message)
 
     def mqtt_message(self, client, userdata, msg):
         msg_json = json.loads(msg.payload.decode("utf-8"))
-        db = DB(config.database)
-        row = db.fetchone("SELECT * FROM Modules WHERE moduleid = '%s'" % msg_json['token'])
-        if row is not None:
-            if row['notify'] == 1:
-                if msg_json['payload'] == '1':
-                    # 428885624
-                    self.updater.bot.send_message(row['userid'], "The light was on!")
-                elif msg_json['payload'] == '0':
-                    self.updater.bot.send_message(row['userid'], "The lights are turned off!")
+        module = Module(msg_json['token'])
+        if module.notify:
+            if msg_json['payload'] == '1':
+                # 428885624
+                self.updater.bot.send_message(module.user_id, "The light was on!")
+            elif msg_json['payload'] == '0':
+                self.updater.bot.send_message(module.user_id, "The lights are turned off!")

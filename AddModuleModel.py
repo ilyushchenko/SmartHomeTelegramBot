@@ -1,8 +1,6 @@
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, RegexHandler
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode
 import sqlite3 as lite
-import random
-import string
 
 
 class AddModule:
@@ -51,8 +49,7 @@ class AddModule:
         con = lite.connect('data.db')
 
         with con:
-            token = ''.join(
-                random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for x in range(16))
+
             cur = con.cursor()
             command = "INSERT INTO Modules(userid, moduleid, name, topic) VALUES(%d, '%s', '%s', '%s')" % (
                 update.message.chat_id, token, user_data['name'], user_data['topic'])

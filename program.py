@@ -1,6 +1,6 @@
 import logging
 import threading
-import config
+import config.settings as config
 from BotModel import BotModel
 from MqttModel import MQTTModel
 

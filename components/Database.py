@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import sqlite3
-
+import config.db_config as config
 
 class DB:
-    def __init__(self, database):
-        self.connection = sqlite3.connect(database)
+    def __init__(self):
+        self.connection = sqlite3.connect(config.database)
         self.connection.row_factory = self.__dict_factory
 
     def execute(self, sql: str) -> sqlite3.Cursor:
